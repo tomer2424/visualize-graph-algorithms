@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.canvas.Canvas?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.VBox?>
+
+<!--
+    Main view of the Graph Algorithm Visualizer.
+    Layout:
+      - TOP: two toolbar rows — graph actions, then algorithm playback controls
+      - CENTER: the Canvas where the graph is drawn
+      - BOTTOM: a color legend, a usage hint, and a status label
+-->
+<BorderPane xmlns="http://javafx.com/javafx/21"
+            xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.graphviz.controller.MainController">
+
+    <!-- TOP: two toolbar rows stacked in a VBox -->
+    <top>
+        <VBox style="-fx-background-color: #f0f0f0;">
+
+            <!-- Row 1: building the graph -->
+            <HBox spacing="10" style="-fx-padding: 10 10 5 10;" alignment="CENTER_LEFT">
+                <Button text="Create Random Graph"
+                        onAction="#onCreateRandomGraph"
+                        style="-fx-font-size: 13px;"/>
+                <Button text="Run Kruskal MST"
+                        onAction="#onRunKruskal"
+                        style="-fx-font-size: 13px; -fx-font-weight: bold;"/>
+            </HBox>
+
+            <!-- Row 2: playing the animation -->
+            <HBox spacing="8" style="-fx-padding: 0 10 10 10;" alignment="CENTER_LEFT">
+                <Label text="Playback:" style="-fx-font-size: 12px;"/>
+                <Button fx:id="playButton"  text="▶ Play"  onAction="#onPlay"  disable="true" style="-fx-font-size: 13px;"/>
+                <Button fx:id="pauseButton" text="⏸ Pause" onAction="#onPause" disable="true" style="-fx-font-size: 13px;"/>
+                <Button fx:id="stepButton"  text="⏭ Step"  onAction="#onStep"  disable="true" style="-fx-font-size: 13px;"/>
+                <Button fx:id="resetButton" text="⟲ Reset" onAction="#onReset" disable="true" style="-fx-font-size: 13px;"/>
+                <Separator orientation="VERTICAL"/>
+                <!-- A small color legend so the meaning of each color is clear -->
+                <Label text="Legend:" style="-fx-font-size: 11px;"/>
+                <Label text="● checking"  style="-fx-font-size: 11px; -fx-text-fill: #d4ac0d;"/>
+                <Label text="● in MST"    style="-fx-font-size: 11px; -fx-text-fill: #1e8449;"/>
+                <Label text="● rejected"  style="-fx-font-size: 11px; -fx-text-fill: #c0392b;"/>
+            </HBox>
+        </VBox>
+    </top>
+
+    <!-- CENTER: the drawing canvas — nodes and edges are painted here -->
+    <center>
+        <!--
+            The Canvas size matches the constants in MainController
+            (CANVAS_WIDTH = 760, CANVAS_HEIGHT = 480) so the bounds
+            used during node placement line up exactly with what is visible.
+        -->
+        <Canvas fx:id="graphCanvas" width="760" height="480"/>
+    </center>
+
+    <!-- BOTTOM: hint line + status message bar -->
+    <bottom>
+        <VBox style="-fx-padding: 6 10 6 10; -fx-background-color: #f0f0f0;" spacing="2">
+            <!-- Static usage hint so the user always knows how to interact -->
+            <Label text="Click empty space = new node  ·  Drag node→node = new edge  ·  Right-click an edge = edit weight"
+                   style="-fx-font-size: 11px; -fx-text-fill: #666666;"/>
+            <Label fx:id="statusLabel"
+                   text="Build a graph, then click 'Run Kruskal MST' and use the playback controls."
+                   style="-fx-font-size: 12px;"/>
+        </VBox>
+    </bottom>
+
+</BorderPane>
