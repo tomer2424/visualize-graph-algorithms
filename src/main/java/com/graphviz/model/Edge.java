@@ -1,11 +1,12 @@
 package com.graphviz.model;
 
 /**
- * A connection between two nodes in the graph, with an optional numeric weight.
+ * A directed connection from a source node to a target node, with a weight.
  *
- * The edge is stored as directed (source → target) to support both MST (where
- * direction does not matter) and Bellman-Ford (where it does). For undirected
- * use, the Graph class adds edges in both directions as needed.
+ * The whole app now treats the graph as directed: the edge always points from
+ * source → target. Kruskal's MST simply ignores the direction, while
+ * Bellman-Ford uses it (and allows negative weights). Two separate edges
+ * A → B and B → A are allowed to model a two-way connection.
  */
 public class Edge {
 

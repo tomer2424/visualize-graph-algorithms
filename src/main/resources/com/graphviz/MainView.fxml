@@ -4,6 +4,8 @@
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.control.ToggleGroup?>
 <?import javafx.scene.layout.BorderPane?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
@@ -23,13 +25,30 @@
     <top>
         <VBox style="-fx-background-color: #f0f0f0;">
 
-            <!-- Row 1: building the graph -->
+            <!-- Row 1: building the graph and choosing the algorithm -->
             <HBox spacing="10" style="-fx-padding: 10 10 5 10;" alignment="CENTER_LEFT">
                 <Button text="Create Random Graph"
                         onAction="#onCreateRandomGraph"
                         style="-fx-font-size: 13px;"/>
-                <Button text="Run Kruskal MST"
-                        onAction="#onRunKruskal"
+                <Separator orientation="VERTICAL"/>
+                <Label text="Algorithm:" style="-fx-font-size: 12px;"/>
+                <!--
+                    Two toggle buttons share one ToggleGroup, so only one can be
+                    selected at a time. Kruskal is selected by default.
+                -->
+                <ToggleButton fx:id="kruskalToggle" text="Kruskal (MST)"
+                              onAction="#onAlgorithmChanged" selected="true"
+                              style="-fx-font-size: 12px;">
+                    <toggleGroup>
+                        <ToggleGroup fx:id="algorithmGroup"/>
+                    </toggleGroup>
+                </ToggleButton>
+                <ToggleButton fx:id="bellmanFordToggle" text="Bellman-Ford (Shortest Path)"
+                              onAction="#onAlgorithmChanged" toggleGroup="$algorithmGroup"
+                              style="-fx-font-size: 12px;"/>
+                <Separator orientation="VERTICAL"/>
+                <Button fx:id="runButton" text="Run"
+                        onAction="#onRun"
                         style="-fx-font-size: 13px; -fx-font-weight: bold;"/>
             </HBox>
 
@@ -43,9 +62,9 @@
                 <Separator orientation="VERTICAL"/>
                 <!-- A small color legend so the meaning of each color is clear -->
                 <Label text="Legend:" style="-fx-font-size: 11px;"/>
-                <Label text="● checking"  style="-fx-font-size: 11px; -fx-text-fill: #d4ac0d;"/>
-                <Label text="● in MST"    style="-fx-font-size: 11px; -fx-text-fill: #1e8449;"/>
-                <Label text="● rejected"  style="-fx-font-size: 11px; -fx-text-fill: #c0392b;"/>
+                <Label text="● checking"        style="-fx-font-size: 11px; -fx-text-fill: #d4ac0d;"/>
+                <Label text="● accepted/improved" style="-fx-font-size: 11px; -fx-text-fill: #1e8449;"/>
+                <Label text="● rejected/cycle"  style="-fx-font-size: 11px; -fx-text-fill: #c0392b;"/>
             </HBox>
         </VBox>
     </top>
@@ -67,7 +86,7 @@
             <Label text="Click empty space = new node  ·  Drag node→node = new edge  ·  Right-click an edge = edit weight"
                    style="-fx-font-size: 11px; -fx-text-fill: #666666;"/>
             <Label fx:id="statusLabel"
-                   text="Build a graph, then click 'Run Kruskal MST' and use the playback controls."
+                   text="Build a graph, choose an algorithm, then press Run and use the playback controls."
                    style="-fx-font-size: 12px;"/>
         </VBox>
     </bottom>

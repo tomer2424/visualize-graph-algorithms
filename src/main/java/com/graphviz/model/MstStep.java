@@ -11,7 +11,7 @@ package com.graphviz.model;
  * algorithm has no idea about colors, threads, or the screen — that is the
  * controller's job.
  */
-public class MstStep {
+public class MstStep implements AlgorithmStep {
 
     /** Whether the checked edge was added to the tree or skipped. */
     public enum Decision {
@@ -27,6 +27,7 @@ public class MstStep {
         this.decision = decision;
     }
 
+    @Override
     public Edge getEdge() {
         return edge;
     }

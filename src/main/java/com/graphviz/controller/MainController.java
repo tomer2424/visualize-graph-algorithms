@@ -1,5 +1,9 @@
 package com.graphviz.controller;
 
+import com.graphviz.model.AlgorithmStep;
+import com.graphviz.model.BellmanFordResult;
+import com.graphviz.model.BellmanFordSolver;
+import com.graphviz.model.BellmanFordStep;
 import com.graphviz.model.Edge;
 import com.graphviz.model.Graph;
 import com.graphviz.model.KruskalSolver;
@@ -21,53 +25,66 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Controller for MainView.fxml.
  *
  * Responsibilities:
- *   1. Build graphs — random generation and manual mouse drawing.
- *   2. Run Kruskal's MST algorithm and animate it step by step.
+ *   1. Build graphs — random generation and manual mouse drawing (directed edges).
+ *   2. Run one of two algorithms — Kruskal's MST or Bellman-Ford shortest paths —
+ *      and animate it step by step.
  *   3. Drive the playback controls (Play / Pause / Step / Reset).
  *
- * Threading rule (important): the algorithm animation runs on a background
- * thread so the GUI never freezes. Every time the animation needs to redraw
- * the canvas or update a label, it does so through Platform.runLater(), which
- * hands the work to the JavaFX Application Thread — the only thread allowed to
- * touch UI controls.
+ * Threading rule (important): the animation runs on a background thread so the
+ * GUI never freezes. Every canvas redraw or label update from that thread goes
+ * through Platform.runLater(), which hands the work to the JavaFX Application
+ * Thread — the only thread allowed to touch UI controls.
  *
- * How the colors are stored: the model classes (Graph, Edge, Node) stay free
- * of any JavaFX code. The visual state of each edge lives here in the
- * controller, in the edgeStates map. This keeps the algorithm plain and testable.
+ * Where the visual state lives: the model classes stay free of JavaFX. The
+ * colors of edges and the distance labels on nodes are kept here in the
+ * controller (edgeStates, nodeDistances). This keeps the algorithms plain and
+ * testable, and works for both algorithms through the shared AlgorithmStep type.
  */
 public class MainController {
+
+    // --- Which algorithm is selected ---
+    private enum Algorithm { KRUSKAL, BELLMAN_FORD }
 
     // --- Visual constants ---
     private static final double NODE_RADIUS        = 18.0;
     private static final double EDGE_HIT_THRESHOLD = 6.0;
+    private static final double ARROW_LENGTH       = 12.0; // length of arrowhead lines
+    private static final double ARROW_WIDTH        = 6.0;  // half-width of arrowhead
+    private static final double CURVE_OFFSET       = 18.0; // how far opposing edges bow apart
 
     private static final Color NODE_FILL    = Color.web("#a8d8ea");
     private static final Color NODE_STROKE  = Color.web("#2c3e50");
+    private static final Color SOURCE_FILL  = Color.web("#f9e79f"); // highlight for BF source node
     private static final Color WEIGHT_COLOR = Color.web("#c0392b");
     private static final Color DRAG_COLOR   = Color.web("#3498db");
+    private static final Color DIST_COLOR   = Color.web("#1a5276"); // distance label color
 
     // Edge state colors
-    private static final Color EDGE_NORMAL    = Color.web("#888888"); // plain gray
+    private static final Color EDGE_NORMAL     = Color.web("#888888"); // plain gray
     private static final Color EDGE_EVALUATING = Color.web("#f1c40f"); // yellow
-    private static final Color EDGE_ACCEPTED  = Color.web("#1e8449"); // green
-    private static final Color EDGE_REJECTED  = Color.web("#c0392b"); // red
+    private static final Color EDGE_ACCEPTED   = Color.web("#1e8449"); // green
+    private static final Color EDGE_REJECTED   = Color.web("#c0392b"); // red
 
     private static final Font NODE_FONT   = Font.font("Arial", 13);
     private static final Font WEIGHT_FONT = Font.font("Arial", 11);
+    private static final Font DIST_FONT   = Font.font("Arial", 11);
 
     // --- Animation timing (milliseconds) ---
-    private static final long EVALUATING_PAUSE  = 500; // how long an edge stays yellow
-    private static final long BETWEEN_STEPS_PAUSE = 350; // gap between steps in Play mode
-    private static final long FADE_DURATION_MS  = 500; // red→gray fade length
+    private static final long EVALUATING_PAUSE    = 500;
+    private static final long BETWEEN_STEPS_PAUSE = 350;
+    private static final long FADE_DURATION_MS    = 500;
 
     /** The visual state of a single edge while the animation runs. */
     private enum EdgeState { NORMAL, EVALUATING, ACCEPTED, REJECTED }
@@ -75,6 +92,7 @@ public class MainController {
     // --- FXML fields ---
     @FXML private Canvas graphCanvas;
     @FXML private Label  statusLabel;
+    @FXML private Button runButton;
     @FXML private Button playButton;
     @FXML private Button pauseButton;
     @FXML private Button stepButton;
@@ -82,26 +100,34 @@ public class MainController {
 
     // --- Model + helpers ---
     private final RandomGraphGenerator generator = new RandomGraphGenerator();
-    private final KruskalSolver solver = new KruskalSolver();
+    private final KruskalSolver kruskalSolver = new KruskalSolver();
+    private final BellmanFordSolver bellmanFordSolver = new BellmanFordSolver();
     private Graph currentGraph;
+
+    // --- Algorithm selection + Bellman-Ford source ---
+    private Algorithm selectedAlgorithm = Algorithm.KRUSKAL;
+    private Node sourceNode;              // chosen source for Bellman-Ford
+    private boolean awaitingSourcePick;   // true while waiting for the user to click a source
 
     // --- Mouse drag state ---
     private Node pressedNode;
     private double pressX, pressY;
 
-    // --- Color state for drawing (edge → its current visual state) ---
+    // --- Color/label state for drawing ---
     private final Map<Edge, EdgeState> edgeStates = new HashMap<>();
-    // Edges currently fading from red to gray, mapped to how far along the fade is (0..1).
-    private final Map<Edge, Double> fadingEdges = new HashMap<>();
+    private final Map<Edge, Double> fadingEdges = new HashMap<>(); // red→gray fade progress (0..1)
+    private final Map<Node, Double> nodeDistances = new HashMap<>(); // BF distances shown on nodes
+    private final Set<Node> flashingNodes = new HashSet<>();         // nodes briefly flashed green
 
-    // --- Algorithm playback state ---
-    private List<MstStep> steps;          // the recorded Kruskal steps to play back
-    private int currentStep;              // index of the next step to run
-    private volatile boolean playing;     // true while auto-playing
-    private volatile boolean stepRequested; // one-shot flag set by the Step button
-    private volatile boolean runActive;   // true while the playback thread is alive
+    // --- Playback state (shared by both algorithms) ---
+    private List<AlgorithmStep> steps;
+    private int currentStep;
+    private volatile boolean playing;
+    private volatile boolean stepRequested;
+    private volatile boolean runActive;
     private Thread animationThread;
-    private int mstTotalWeight;           // running total of accepted edge weights
+    private int mstTotalWeight;           // running total for Kruskal
+    private BellmanFordResult bfResult;   // kept so we can show the negative cycle at the end
 
     // -------------------------------------------------------------------------
     // JavaFX lifecycle
@@ -116,57 +142,117 @@ public class MainController {
         graphCanvas.setOnMouseReleased(this::onCanvasReleased);
 
         drawGraph();
-        statusLabel.setText("Click empty space = new node · Drag node→node = edge · Right-click edge = edit weight.");
+        statusLabel.setText("Click empty space = new node · Drag node→node = directed edge · Right-click edge = edit weight.");
     }
 
     // -------------------------------------------------------------------------
-    // Graph building buttons
+    // Graph building + algorithm selection
     // -------------------------------------------------------------------------
 
     @FXML
     private void onCreateRandomGraph() {
-        stopAnyRun(); // a new graph cancels any prepared/running animation
+        stopAnyRun();
         currentGraph = generator.generate(graphCanvas.getWidth(), graphCanvas.getHeight());
-        clearColors();
+        sourceNode = null;
+        clearColorsAndDistances();
         disablePlaybackButtons();
+        // If Bellman-Ford is selected, the user must pick a new source on the new graph.
+        if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
+            awaitingSourcePick = true;
+        }
         drawGraph();
         statusLabel.setText("Random graph created: "
                 + currentGraph.getNodes().size() + " nodes, "
-                + currentGraph.getEdges().size() + " edges. Click 'Run Kruskal MST' to begin.");
+                + currentGraph.getEdges().size() + " edges. "
+                + (awaitingSourcePick ? "Click a node to set the source." : "Press Run to begin."));
+    }
+
+    /** Called when the user clicks one of the algorithm toggle buttons. */
+    @FXML
+    private void onAlgorithmChanged() {
+        stopAnyRun();
+        steps = null;
+        clearColorsAndDistances();
+        disablePlaybackButtons();
+
+        // Figure out which toggle is now on. The Kruskal toggle starts selected,
+        // so we treat "not Bellman-Ford" as Kruskal.
+        boolean bfSelected = bellmanFordToggleSelected();
+        selectedAlgorithm = bfSelected ? Algorithm.BELLMAN_FORD : Algorithm.KRUSKAL;
+
+        if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
+            sourceNode = null;
+            awaitingSourcePick = true;
+            statusLabel.setText("Bellman-Ford selected — click a node to set the source for shortest paths.");
+        } else {
+            awaitingSourcePick = false;
+            sourceNode = null;
+            statusLabel.setText("Kruskal (MST) selected — press Run to find the minimum spanning tree.");
+        }
+        drawGraph();
+    }
+
+    // The Bellman-Ford toggle's selected state, injected by FXML.
+    @FXML private javafx.scene.control.ToggleButton bellmanFordToggle;
+    private boolean bellmanFordToggleSelected() {
+        return bellmanFordToggle != null && bellmanFordToggle.isSelected();
     }
 
     // -------------------------------------------------------------------------
-    // Kruskal MST: prepare and playback controls
+    // Run + playback controls
     // -------------------------------------------------------------------------
 
-    /**
-     * Prepares an MST run: solves Kruskal instantly, stores the step list,
-     * resets colors, and enables the playback buttons. Does not start playing yet.
-     */
+    /** Prepares a run for whichever algorithm is selected. */
     @FXML
-    private void onRunKruskal() {
+    private void onRun() {
         if (currentGraph.getNodes().isEmpty() || currentGraph.getEdges().isEmpty()) {
             statusLabel.setText("Please build a graph with at least one edge first.");
             return;
         }
 
-        stopAnyRun();
+        if (selectedAlgorithm == Algorithm.KRUSKAL) {
+            prepareKruskal();
+        } else {
+            prepareBellmanFord();
+        }
+    }
 
-        // Solve instantly on the JavaFX thread — this is just plain computation.
-        steps = solver.solve(currentGraph);
+    private void prepareKruskal() {
+        stopAnyRun();
+        steps = new ArrayList<>(kruskalSolver.solve(currentGraph)); // List<MstStep> → List<AlgorithmStep>
+        bfResult = null;
         currentStep = 0;
         mstTotalWeight = 0;
-        clearColors();
+        clearColorsAndDistances();
         drawGraph();
-
-        // Enable playback; start the background thread that waits for Play/Step.
-        playButton.setDisable(false);
-        pauseButton.setDisable(false);
-        stepButton.setDisable(false);
-        resetButton.setDisable(false);
-
+        enablePlaybackButtons();
         startAnimationThread();
-        statusLabel.setText("Ready. Press Play to run automatically, or Step to advance one edge at a time.");
+        statusLabel.setText("Kruskal ready. Press Play to run, or Step to advance one edge at a time.");
+    }
+
+    private void prepareBellmanFord() {
+        if (sourceNode == null) {
+            awaitingSourcePick = true;
+            statusLabel.setText("Please click a node first to set the Bellman-Ford source.");
+            return;
+        }
+        stopAnyRun();
+        bfResult = bellmanFordSolver.solve(currentGraph, sourceNode);
+        steps = bfResult.getSteps();
+        currentStep = 0;
+        clearColorsAndDistances();
+
+        // Show the starting distances: source = 0, everyone else = infinity.
+        for (Node n : currentGraph.getNodes()) {
+            nodeDistances.put(n, Double.POSITIVE_INFINITY);
+        }
+        nodeDistances.put(sourceNode, 0.0);
+
+        drawGraph();
+        enablePlaybackButtons();
+        startAnimationThread();
+        statusLabel.setText("Bellman-Ford ready from source '" + sourceNode.getId()
+                + "'. Press Play, or Step to advance one relaxation at a time.");
     }
 
     @FXML
@@ -185,25 +271,29 @@ public class MainController {
     @FXML
     private void onStep() {
         if (steps == null) return;
-        playing = false;      // stepping is manual, so make sure auto-play is off
-        stepRequested = true; // the background loop will run exactly one step
+        playing = false;
+        stepRequested = true;
     }
 
-    /**
-     * Resets the animation WITHOUT deleting the graph.
-     * Stops the loop, clears all colors, and rewinds to the first step so the
-     * same graph can be replayed from the beginning.
-     */
+    /** Resets the animation WITHOUT deleting the graph, so it can be replayed. */
     @FXML
     private void onReset() {
         stopAnyRun();
         currentStep = 0;
         mstTotalWeight = 0;
-        clearColors();
+        clearColorsAndDistances();
+
+        // For Bellman-Ford, restore the initial distance labels after a reset.
+        if (selectedAlgorithm == Algorithm.BELLMAN_FORD && sourceNode != null) {
+            for (Node n : currentGraph.getNodes()) {
+                nodeDistances.put(n, Double.POSITIVE_INFINITY);
+            }
+            nodeDistances.put(sourceNode, 0.0);
+        }
         drawGraph();
 
-        // If we still have a solved step list, re-arm the thread so Play works again.
         if (steps != null && !steps.isEmpty()) {
+            enablePlaybackButtons();
             startAnimationThread();
             statusLabel.setText("Reset. The graph is unchanged — press Play or Step to run again.");
         } else {
@@ -213,14 +303,9 @@ public class MainController {
     }
 
     // -------------------------------------------------------------------------
-    // The playback engine (runs on a background thread)
+    // The playback engine (background thread) — shared by both algorithms
     // -------------------------------------------------------------------------
 
-    /**
-     * Starts the single background thread that walks through the step list.
-     * The thread waits until Play is on or a Step is requested, then runs one
-     * step. All drawing is pushed to the JavaFX thread via Platform.runLater().
-     */
     private void startAnimationThread() {
         runActive = true;
         playing = false;
@@ -229,12 +314,11 @@ public class MainController {
         animationThread = new Thread(() -> {
             try {
                 while (runActive && currentStep < steps.size()) {
-                    // Wait here until the user presses Play (auto) or Step (one-shot).
                     while (runActive && !playing && !stepRequested) {
                         Thread.sleep(20);
                     }
                     if (!runActive) {
-                        return; // a reset or new graph stopped us
+                        return;
                     }
 
                     boolean wasSingleStep = stepRequested;
@@ -243,27 +327,16 @@ public class MainController {
                     runOneStep();
 
                     if (wasSingleStep) {
-                        // After a single Step, fall back to waiting again.
                         playing = false;
                     } else {
-                        // In Play mode, pause briefly before the next step.
                         Thread.sleep(BETWEEN_STEPS_PAUSE);
                     }
                 }
 
-                // Reached the end of the list — show the final summary.
                 if (runActive && currentStep >= steps.size()) {
-                    final int total = mstTotalWeight;
-                    Platform.runLater(() -> {
-                        playing = false;
-                        statusLabel.setText("MST complete — total weight = " + total
-                                + ". Press Reset to run again on the same graph.");
-                        playButton.setDisable(true);
-                        stepButton.setDisable(true);
-                    });
+                    Platform.runLater(this::finishRun);
                 }
             } catch (InterruptedException e) {
-                // Thread was interrupted by a reset — just stop cleanly.
                 Thread.currentThread().interrupt();
             }
         });
@@ -271,16 +344,23 @@ public class MainController {
         animationThread.start();
     }
 
-    /**
-     * Runs exactly one Kruskal step: highlight the edge yellow, pause, then
-     * color it green (accepted) or red-then-fade (rejected).
-     * Called from the background thread.
-     */
+    /** Runs exactly one step, choosing the visual effect by the step's type. */
     private void runOneStep() throws InterruptedException {
-        MstStep step = steps.get(currentStep);
+        AlgorithmStep step = steps.get(currentStep);
+
+        if (step instanceof MstStep mstStep) {
+            runMstStep(mstStep);
+        } else if (step instanceof BellmanFordStep bfStep) {
+            runBellmanFordStep(bfStep);
+        }
+
+        currentStep++;
+    }
+
+    /** Kruskal step: yellow → green (accept) or red-fade (reject). */
+    private void runMstStep(MstStep step) throws InterruptedException {
         Edge edge = step.getEdge();
 
-        // 1) Highlight the edge being checked in yellow.
         edgeStates.put(edge, EdgeState.EVALUATING);
         final int stepNumber = currentStep + 1;
         Platform.runLater(() -> {
@@ -291,40 +371,90 @@ public class MainController {
         });
         Thread.sleep(EVALUATING_PAUSE);
 
-        // 2) Apply the recorded decision.
         if (step.getDecision() == MstStep.Decision.ACCEPTED) {
             edgeStates.put(edge, EdgeState.ACCEPTED);
             mstTotalWeight += (int) edge.getWeight();
             Platform.runLater(this::drawGraph);
         } else {
-            // Rejected: show red, then smoothly fade back to gray.
             edgeStates.put(edge, EdgeState.REJECTED);
             Platform.runLater(this::drawGraph);
             startFade(edge);
         }
-
-        currentStep++;
     }
 
-    /**
-     * Smoothly fades a rejected edge from red back to normal gray.
-     * The fade runs on the JavaFX thread using an AnimationTimer, which calls
-     * us once per frame with the current time so we can compute progress.
-     */
+    /** Bellman-Ford step: yellow while relaxing; if it improved, flash edge+node green. */
+    private void runBellmanFordStep(BellmanFordStep step) throws InterruptedException {
+        Edge edge = step.getEdge();
+
+        edgeStates.put(edge, EdgeState.EVALUATING);
+        final int stepNumber = currentStep + 1;
+        Platform.runLater(() -> {
+            drawGraph();
+            statusLabel.setText("Step " + stepNumber + "/" + steps.size()
+                    + ": relaxing edge " + edge.getSource().getId() + "→" + edge.getTarget().getId()
+                    + " (weight " + (int) edge.getWeight() + ")");
+        });
+        Thread.sleep(EVALUATING_PAUSE);
+
+        if (step.isImproved()) {
+            // Update the distance label and flash the edge + target node green.
+            Node updated = step.getUpdatedNode();
+            double newDist = step.getNewDistance();
+            nodeDistances.put(updated, newDist);
+            edgeStates.put(edge, EdgeState.ACCEPTED);
+            flashingNodes.add(updated);
+            Platform.runLater(this::drawGraph);
+            Thread.sleep(EVALUATING_PAUSE);
+
+            // Settle back: edge to normal, node stops flashing (label stays).
+            flashingNodes.remove(updated);
+            edgeStates.put(edge, EdgeState.NORMAL);
+            Platform.runLater(this::drawGraph);
+        } else {
+            // No improvement — just clear the yellow highlight.
+            edgeStates.put(edge, EdgeState.NORMAL);
+            Platform.runLater(this::drawGraph);
+        }
+    }
+
+    /** Called on the JavaFX thread when the step list is finished. */
+    private void finishRun() {
+        playing = false;
+        playButton.setDisable(true);
+        stepButton.setDisable(true);
+
+        if (selectedAlgorithm == Algorithm.KRUSKAL) {
+            statusLabel.setText("MST complete — total weight = " + mstTotalWeight
+                    + ". Press Reset to run again on the same graph.");
+        } else {
+            if (bfResult != null && bfResult.hasNegativeCycle()) {
+                // Highlight the negative cycle edges in red.
+                for (Edge e : bfResult.getCycleEdges()) {
+                    edgeStates.put(e, EdgeState.REJECTED);
+                }
+                statusLabel.setText("⚠ Negative-weight cycle detected — shortest paths are undefined. "
+                        + "The cycle edges are shown in red.");
+            } else {
+                statusLabel.setText("Bellman-Ford complete — shortest distances from '"
+                        + (sourceNode != null ? sourceNode.getId() : "?")
+                        + "' are shown on the nodes. Press Reset to run again.");
+            }
+        }
+        drawGraph();
+    }
+
+    /** Smoothly fades a rejected edge from red back to gray (used by Kruskal). */
     private void startFade(Edge edge) {
         Platform.runLater(() -> {
             fadingEdges.put(edge, 0.0);
             final long startTime = System.nanoTime();
-
             new AnimationTimer() {
                 @Override
                 public void handle(long now) {
                     double elapsedMs = (now - startTime) / 1_000_000.0;
                     double progress = Math.min(1.0, elapsedMs / FADE_DURATION_MS);
                     fadingEdges.put(edge, progress);
-
                     if (progress >= 1.0) {
-                        // Fade done — edge is back to normal.
                         fadingEdges.remove(edge);
                         edgeStates.put(edge, EdgeState.NORMAL);
                         stop();
@@ -335,7 +465,6 @@ public class MainController {
         });
     }
 
-    /** Stops the playback thread and clears its flags. The graph stays intact. */
     private void stopAnyRun() {
         runActive = false;
         playing = false;
@@ -345,12 +474,21 @@ public class MainController {
             animationThread = null;
         }
         fadingEdges.clear();
+        flashingNodes.clear();
     }
 
-    /** Resets every edge back to NORMAL color state. */
-    private void clearColors() {
+    private void clearColorsAndDistances() {
         edgeStates.clear();
         fadingEdges.clear();
+        flashingNodes.clear();
+        nodeDistances.clear();
+    }
+
+    private void enablePlaybackButtons() {
+        playButton.setDisable(false);
+        pauseButton.setDisable(false);
+        stepButton.setDisable(false);
+        resetButton.setDisable(false);
     }
 
     private void disablePlaybackButtons() {
@@ -361,7 +499,7 @@ public class MainController {
     }
 
     // -------------------------------------------------------------------------
-    // Mouse handlers (manual graph drawing)
+    // Mouse handlers (manual graph drawing + source picking)
     // -------------------------------------------------------------------------
 
     private void onCanvasPressed(MouseEvent e) {
@@ -375,11 +513,24 @@ public class MainController {
             }
             return;
         }
+
+        // If we are waiting for the user to choose a Bellman-Ford source, the
+        // next click on a node sets the source instead of starting a drag.
+        if (awaitingSourcePick) {
+            Node picked = findNodeAt(pressX, pressY);
+            if (picked != null) {
+                setSource(picked);
+            } else {
+                statusLabel.setText("Click directly on a node to set the source.");
+            }
+            return;
+        }
+
         pressedNode = findNodeAt(pressX, pressY);
     }
 
     private void onCanvasDragged(MouseEvent e) {
-        if (pressedNode == null) {
+        if (pressedNode == null || awaitingSourcePick) {
             return;
         }
         drawGraph();
@@ -387,7 +538,7 @@ public class MainController {
     }
 
     private void onCanvasReleased(MouseEvent e) {
-        if (e.getButton() != MouseButton.PRIMARY) {
+        if (e.getButton() != MouseButton.PRIMARY || awaitingSourcePick) {
             return;
         }
 
@@ -407,15 +558,28 @@ public class MainController {
         pressedNode = null;
     }
 
-    /**
-     * Editing the graph would make any prepared MST run out of date, so we
-     * cancel the run and clear colors whenever the user changes the graph.
-     */
+    /** Sets the Bellman-Ford source node and shows the starting distances. */
+    private void setSource(Node node) {
+        sourceNode = node;
+        awaitingSourcePick = false;
+        clearColorsAndDistances();
+        for (Node n : currentGraph.getNodes()) {
+            nodeDistances.put(n, Double.POSITIVE_INFINITY);
+        }
+        nodeDistances.put(sourceNode, 0.0);
+        drawGraph();
+        statusLabel.setText("Source set to '" + node.getId() + "'. Press Run to compute shortest paths.");
+    }
+
+    /** Editing the graph cancels any prepared run so the steps cannot go stale. */
     private void cancelRunBecauseGraphChanged() {
         if (runActive || steps != null) {
             stopAnyRun();
             steps = null;
-            clearColors();
+            bfResult = null;
+            edgeStates.clear();
+            fadingEdges.clear();
+            flashingNodes.clear();
             disablePlaybackButtons();
         }
     }
@@ -433,37 +597,35 @@ public class MainController {
     }
 
     private void tryAddEdge(Node source, Node target) {
-        if (currentGraph.hasEdgeBetween(source, target)) {
-            statusLabel.setText("Edge already exists between '" + source.getId()
-                    + "' and '" + target.getId() + "'.");
+        // Directed: block only an edge already going this same direction.
+        if (currentGraph.hasDirectedEdge(source, target)) {
+            statusLabel.setText("A directed edge '" + source.getId() + "→" + target.getId()
+                    + "' already exists.");
             drawGraph();
             return;
         }
         cancelRunBecauseGraphChanged();
         currentGraph.addEdge(source, target, 1);
         drawGraph();
-        statusLabel.setText("Edge '" + source.getId() + "'→'" + target.getId()
-                + "' added with weight 1. Right-click the edge to change its weight.");
+        statusLabel.setText("Directed edge '" + source.getId() + "→" + target.getId()
+                + "' added with weight 1. Right-click it to change the weight (negatives allowed).");
     }
 
+    /** Edit dialog now accepts negative integers (Bellman-Ford allows them). */
     private void editEdgeWeight(Edge edge) {
         TextInputDialog dialog = new TextInputDialog(String.valueOf((int) edge.getWeight()));
         dialog.setTitle("Edit Edge Weight");
         dialog.setHeaderText("Edge: " + edge.getSource().getId() + " → " + edge.getTarget().getId());
-        dialog.setContentText("New weight (positive integer):");
+        dialog.setContentText("New weight (any integer, negatives allowed):");
 
         Optional<String> result = dialog.showAndWait();
         result.ifPresent(input -> {
             try {
                 int newWeight = Integer.parseInt(input.trim());
-                if (newWeight > 0) {
-                    cancelRunBecauseGraphChanged();
-                    edge.setWeight(newWeight);
-                    drawGraph();
-                    statusLabel.setText("Weight updated to " + newWeight + ".");
-                } else {
-                    statusLabel.setText("Weight must be a positive number — not changed.");
-                }
+                cancelRunBecauseGraphChanged();
+                edge.setWeight(newWeight);
+                drawGraph();
+                statusLabel.setText("Weight updated to " + newWeight + ".");
             } catch (NumberFormatException ex) {
                 statusLabel.setText("'" + input + "' is not a valid integer — weight not changed.");
             }
@@ -522,10 +684,6 @@ public class MainController {
     // Drawing
     // -------------------------------------------------------------------------
 
-    /**
-     * Paints the whole graph, using each edge's current color state.
-     * Edges are drawn first so node circles sit on top of the lines.
-     */
     private void drawGraph() {
         GraphicsContext gc = graphCanvas.getGraphicsContext2D();
 
@@ -533,56 +691,158 @@ public class MainController {
         gc.setFill(Color.web("#fafafa"));
         gc.fillRect(0, 0, graphCanvas.getWidth(), graphCanvas.getHeight());
 
-        // --- Step 1: edges (colored by their current state) ---
+        // --- Step 1: directed edges with arrowheads ---
         gc.setFont(WEIGHT_FONT);
         gc.setTextAlign(TextAlignment.CENTER);
         gc.setTextBaseline(VPos.CENTER);
 
         for (Edge edge : currentGraph.getEdges()) {
-            double x1 = edge.getSource().getX();
-            double y1 = edge.getSource().getY();
-            double x2 = edge.getTarget().getX();
-            double y2 = edge.getTarget().getY();
-
-            gc.setStroke(colorForEdge(edge));
-            // Accepted (MST) edges are drawn thicker so the tree stands out.
-            gc.setLineWidth(edgeStates.get(edge) == EdgeState.ACCEPTED ? 3.5 : 1.5);
-            gc.strokeLine(x1, y1, x2, y2);
-
-            double midX = (x1 + x2) / 2.0;
-            double midY = (y1 + y2) / 2.0 - 8.0;
-            gc.setFill(WEIGHT_COLOR);
-            gc.fillText(String.valueOf((int) edge.getWeight()), midX, midY);
+            drawDirectedEdge(gc, edge);
         }
 
-        // --- Step 2: nodes on top ---
+        // --- Step 2: nodes on top, with id and (for BF) distance label ---
         gc.setFont(NODE_FONT);
-        gc.setLineWidth(2.0);
         for (Node node : currentGraph.getNodes()) {
             double cx = node.getX();
             double cy = node.getY();
             double r  = NODE_RADIUS;
 
-            gc.setFill(NODE_FILL);
+            // A flashing (just-improved) node, or the BF source, get a highlight fill.
+            if (flashingNodes.contains(node)) {
+                gc.setFill(EDGE_ACCEPTED);
+            } else if (node.equals(sourceNode)) {
+                gc.setFill(SOURCE_FILL);
+            } else {
+                gc.setFill(NODE_FILL);
+            }
             gc.fillOval(cx - r, cy - r, r * 2, r * 2);
+
             gc.setStroke(NODE_STROKE);
+            gc.setLineWidth(2.0);
             gc.strokeOval(cx - r, cy - r, r * 2, r * 2);
+
             gc.setFill(NODE_STROKE);
             gc.fillText(node.getId(), cx, cy);
+
+            // Distance label (only when Bellman-Ford distances exist).
+            Double dist = nodeDistances.get(node);
+            if (dist != null) {
+                String text = (dist == Double.POSITIVE_INFINITY) ? "∞" : String.valueOf((int) (double) dist);
+                gc.setFont(DIST_FONT);
+                gc.setFill(DIST_COLOR);
+                gc.fillText(text, cx, cy - r - 9); // just above the circle
+                gc.setFont(NODE_FONT);
+            }
         }
     }
 
     /**
-     * Picks the color to draw an edge with, based on its state.
-     * A rejected edge that is mid-fade is blended between red and gray.
+     * Draws one directed edge with an arrowhead at the target circle's edge.
+     * If the opposite edge (target → source) also exists, both are drawn as
+     * slight curves bowed to opposite sides so the two arrows do not overlap.
      */
+    private void drawDirectedEdge(GraphicsContext gc, Edge edge) {
+        double sx = edge.getSource().getX();
+        double sy = edge.getSource().getY();
+        double tx = edge.getTarget().getX();
+        double ty = edge.getTarget().getY();
+
+        double dx = tx - sx;
+        double dy = ty - sy;
+        double len = Math.hypot(dx, dy);
+        if (len == 0) {
+            return; // source and target at the same spot — nothing to draw
+        }
+        double ux = dx / len; // unit vector along the edge
+        double uy = dy / len;
+
+        // Does the reverse edge also exist? If so, curve this one to the side.
+        boolean twoWay = currentGraph.hasDirectedEdge(edge.getTarget(), edge.getSource());
+
+        // Stop the line at the target circle's edge so the arrow tip touches it.
+        double endX = tx - ux * NODE_RADIUS;
+        double endY = ty - uy * NODE_RADIUS;
+        // Start just outside the source circle too, for a cleaner look.
+        double startX = sx + ux * NODE_RADIUS;
+        double startY = sy + uy * NODE_RADIUS;
+
+        Color color = colorForEdge(edge);
+        gc.setStroke(color);
+        gc.setLineWidth(edgeStates.get(edge) == EdgeState.ACCEPTED ? 3.5 : 1.8);
+
+        double labelX, labelY;     // where to draw the weight number
+        double arrowFromX, arrowFromY; // direction the arrowhead points along
+
+        if (twoWay) {
+            // Perpendicular offset for the curve's control point.
+            double px = -uy * CURVE_OFFSET;
+            double py = ux * CURVE_OFFSET;
+            double ctrlX = (startX + endX) / 2 + px;
+            double ctrlY = (startY + endY) / 2 + py;
+
+            gc.beginPath();
+            gc.moveTo(startX, startY);
+            gc.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+            gc.stroke();
+
+            // The arrow should point along the curve's tangent near the end,
+            // which is the direction from the control point to the end.
+            arrowFromX = endX - ctrlX;
+            arrowFromY = endY - ctrlY;
+            labelX = ctrlX;
+            labelY = ctrlY;
+        } else {
+            gc.strokeLine(startX, startY, endX, endY);
+            arrowFromX = ux;
+            arrowFromY = uy;
+            labelX = (startX + endX) / 2;
+            labelY = (startY + endY) / 2 - 8;
+        }
+
+        drawArrowHead(gc, endX, endY, arrowFromX, arrowFromY, color);
+
+        // Weight number.
+        gc.setFill(WEIGHT_COLOR);
+        gc.fillText(String.valueOf((int) edge.getWeight()), labelX, labelY);
+    }
+
+    /**
+     * Draws a small arrowhead at point (x, y), pointing in the direction of
+     * the vector (dirX, dirY). Two short lines form the head.
+     */
+    private void drawArrowHead(GraphicsContext gc, double x, double y,
+                               double dirX, double dirY, Color color) {
+        double len = Math.hypot(dirX, dirY);
+        if (len == 0) return;
+        double ux = dirX / len;
+        double uy = dirY / len;
+
+        // Two points behind the tip, spread to each side.
+        double baseX = x - ux * ARROW_LENGTH;
+        double baseY = y - uy * ARROW_LENGTH;
+        // Perpendicular direction.
+        double perpX = -uy;
+        double perpY = ux;
+
+        double leftX = baseX + perpX * ARROW_WIDTH;
+        double leftY = baseY + perpY * ARROW_WIDTH;
+        double rightX = baseX - perpX * ARROW_WIDTH;
+        double rightY = baseY - perpY * ARROW_WIDTH;
+
+        gc.setFill(color);
+        gc.beginPath();
+        gc.moveTo(x, y);
+        gc.lineTo(leftX, leftY);
+        gc.lineTo(rightX, rightY);
+        gc.closePath();
+        gc.fill();
+    }
+
     private Color colorForEdge(Edge edge) {
-        // If this edge is fading, blend red→gray by how far the fade has gone.
         Double fade = fadingEdges.get(edge);
         if (fade != null) {
             return EDGE_REJECTED.interpolate(EDGE_NORMAL, fade);
         }
-
         EdgeState state = edgeStates.getOrDefault(edge, EdgeState.NORMAL);
         return switch (state) {
             case EVALUATING -> EDGE_EVALUATING;

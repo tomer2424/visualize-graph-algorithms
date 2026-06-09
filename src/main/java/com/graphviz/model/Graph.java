@@ -85,13 +85,28 @@ public class Graph {
 
     /**
      * Returns true if an edge already exists between a and b in either direction.
-     * Used to prevent duplicate edges when drawing manually.
+     * The random graph generator uses this to avoid building two edges for the
+     * same pair of nodes.
      */
     public boolean hasEdgeBetween(Node a, Node b) {
         for (Edge edge : edges) {
             boolean forward  = edge.getSource().equals(a) && edge.getTarget().equals(b);
             boolean backward = edge.getSource().equals(b) && edge.getTarget().equals(a);
             if (forward || backward) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if a directed edge already goes from source to target.
+     * Because the graph is directed, this checks one direction only — so the
+     * user can still add the opposite edge (target → source) separately.
+     */
+    public boolean hasDirectedEdge(Node source, Node target) {
+        for (Edge edge : edges) {
+            if (edge.getSource().equals(source) && edge.getTarget().equals(target)) {
                 return true;
             }
         }

@@ -1,8 +1,13 @@
+com\graphviz\controller\MainController$Algorithm.class
 com\graphviz\Main.class
 com\graphviz\controller\MainController$1.class
 com\graphviz\controller\MainController$EdgeState.class
 com\graphviz\controller\MainController.class
+com\graphviz\model\AlgorithmStep.class
+com\graphviz\model\BellmanFordStep.class
+com\graphviz\model\BellmanFordSolver.class
 com\graphviz\model\KruskalSolver.class
+com\graphviz\model\BellmanFordResult.class
 com\graphviz\model\Edge.class
 com\graphviz\model\Node.class
 com\graphviz\model\RandomGraphGenerator.class
