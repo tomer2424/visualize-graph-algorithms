@@ -159,7 +159,7 @@ public class MainController {
     public void initialize() {
         currentGraph = new Graph();
 
-        algorithmCombo.getItems().addAll(LABEL_KRUSKAL, LABEL_BELLMAN_FORD, LABEL_PRIM, LABEL_BFS, LABEL_DFS);
+        algorithmCombo.getItems().addAll(LABEL_NONE, LABEL_KRUSKAL, LABEL_BELLMAN_FORD, LABEL_PRIM, LABEL_BFS, LABEL_DFS);
         // Show placeholder text when nothing is selected (JavaFX doesn't support promptText on non-editable combos).
         algorithmCombo.setButtonCell(new ListCell<>() {
             @Override protected void updateItem(String item, boolean empty) {
@@ -213,16 +213,27 @@ public class MainController {
     /** Called when the user clicks one of the algorithm toggle buttons. */
     @FXML
     private void onAlgorithmChanged() {
-        if (algorithmCombo.getValue() == null) return;
+        String selected = algorithmCombo.getValue();
+        if (selected == null) return;
 
         stopAnyRun();
         steps = null;
         clearColorsAndDistances();
+
+        // "Choose an algorithm" selected — reset to no-selection state.
+        if (LABEL_NONE.equals(selected)) {
+            selectedAlgorithm = null; // must be set before exitRunMode() so Run stays disabled
+            sourceNode = null;
+            awaitingSourcePick = false;
+            exitRunMode();
+            drawGraph();
+            statusLabel.setText("Choose an algorithm from the list to get started.");
+            return;
+        }
+
         exitRunMode();
 
-        runButton.setDisable(false); // an algorithm is now chosen — Run is valid
-
-        String selected = algorithmCombo.getValue();
+        runButton.setDisable(false); // a real algorithm is now chosen — Run is valid
         if (LABEL_BELLMAN_FORD.equals(selected)) {
             selectedAlgorithm = Algorithm.BELLMAN_FORD;
         } else if (LABEL_PRIM.equals(selected)) {
@@ -266,6 +277,7 @@ public class MainController {
     }
 
     // Labels shown in the algorithm drop-down, matching Algorithm enum order.
+    private static final String LABEL_NONE          = "Choose an algorithm";
     private static final String LABEL_KRUSKAL      = "Kruskal (MST)";
     private static final String LABEL_BELLMAN_FORD = "Bellman-Ford (Shortest Path)";
     private static final String LABEL_PRIM         = "Prim (MST)";
