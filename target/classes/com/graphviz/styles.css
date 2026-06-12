@@ -1,0 +1,192 @@
+/*
+ * Modern light theme for the Graph Algorithm Visualizer.
+ *
+ * Palette
+ *   background        #f7f8fa   page behind the surfaces
+ *   surface (white)   #ffffff   toolbars and status bar
+ *   border            #e4e7ec   hairline separators
+ *   accent (blue)     #3478f6   primary actions, selected toggle, links
+ *   accent hover      #2c63d6
+ *   text              #1f2430   main text
+ *   text muted        #6b7280   hints, secondary labels
+ *
+ * The semantic state colors (checking/accepted/rejected) intentionally match
+ * the colors drawn on the canvas in MainController, so the legend agrees with
+ * what the user sees in the graph.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Root + surfaces                                                     */
+/* ------------------------------------------------------------------ */
+
+.root {
+    -fx-background-color: #f7f8fa;
+    -fx-font-family: "Segoe UI", "Arial", sans-serif;
+}
+
+/* The two stacked toolbar rows live in this container. */
+.toolbar-area {
+    -fx-background-color: #ffffff;
+    -fx-border-color: transparent transparent #e4e7ec transparent;
+    -fx-border-width: 0 0 1 0;
+    -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.06), 8, 0.0, 0, 2);
+}
+
+.toolbar-row {
+    -fx-padding: 10 14 10 14;
+}
+
+/* Bottom hint + status container. */
+.status-area {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #e4e7ec transparent transparent transparent;
+    -fx-border-width: 1 0 0 0;
+    -fx-padding: 8 14 8 14;
+}
+
+/* The framed drawing surface that holds the canvas. */
+.canvas-area {
+    -fx-background-color: #fdfdfe;
+    -fx-padding: 8;
+}
+
+/* ------------------------------------------------------------------ */
+/* Buttons                                                             */
+/* ------------------------------------------------------------------ */
+
+.button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #1f2430;
+    -fx-font-size: 13px;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #d7dbe3;
+    -fx-border-width: 1;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+
+.button:hover {
+    -fx-background-color: #f0f4ff;
+    -fx-border-color: #b9c6e6;
+}
+
+.button:pressed {
+    -fx-background-color: #e3ebfd;
+}
+
+.button:disabled {
+    -fx-opacity: 0.45;
+    -fx-cursor: default;
+}
+
+/* Primary call-to-action: the Run button. */
+.button-primary {
+    -fx-background-color: #3478f6;
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+    -fx-border-color: transparent;
+    -fx-effect: dropshadow(gaussian, rgba(52,120,246,0.35), 6, 0.0, 0, 1);
+}
+
+.button-primary:hover {
+    -fx-background-color: #2c63d6;
+}
+
+.button-primary:pressed {
+    -fx-background-color: #2554bb;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toggle buttons (algorithm selector) — segmented look                */
+/* ------------------------------------------------------------------ */
+
+.toggle-button {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #1f2430;
+    -fx-font-size: 12px;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #d7dbe3;
+    -fx-border-width: 1;
+    -fx-padding: 7 14 7 14;
+    -fx-cursor: hand;
+}
+
+.toggle-button:hover {
+    -fx-background-color: #f0f4ff;
+    -fx-border-color: #b9c6e6;
+}
+
+.toggle-button:selected {
+    -fx-background-color: #3478f6;
+    -fx-text-fill: white;
+    -fx-border-color: transparent;
+}
+
+.toggle-button:selected:hover {
+    -fx-background-color: #2c63d6;
+}
+
+/* ------------------------------------------------------------------ */
+/* Algorithm drop-down (ComboBox)                                     */
+/* ------------------------------------------------------------------ */
+
+.algorithm-combo {
+    -fx-font-size: 13px;
+    -fx-background-radius: 8;
+    -fx-border-radius: 8;
+    -fx-border-color: #d7dbe3;
+    -fx-border-width: 1;
+    -fx-background-color: #ffffff;
+    -fx-cursor: hand;
+    -fx-padding: 3 8 3 8;
+}
+
+.algorithm-combo:hover {
+    -fx-background-color: #f0f4ff;
+    -fx-border-color: #b9c6e6;
+}
+
+.algorithm-combo .list-cell {
+    -fx-padding: 5 10 5 10;
+    -fx-font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Separators                                                          */
+/* ------------------------------------------------------------------ */
+
+.separator .line {
+    -fx-border-color: #e4e7ec;
+}
+
+/* ------------------------------------------------------------------ */
+/* Labels                                                              */
+/* ------------------------------------------------------------------ */
+
+.section-label {
+    -fx-font-size: 12px;
+    -fx-text-fill: #6b7280;
+    -fx-font-weight: bold;
+}
+
+.hint-label {
+    -fx-font-size: 11px;
+    -fx-text-fill: #6b7280;
+}
+
+.status-label {
+    -fx-font-size: 12.5px;
+    -fx-text-fill: #1f2430;
+}
+
+.legend-label {
+    -fx-font-size: 11px;
+    -fx-text-fill: #6b7280;
+}
+
+/* Legend dots — hex values mirror the canvas state colors. */
+.legend-checking { -fx-font-size: 11px; -fx-text-fill: #e0a800; }
+.legend-accepted { -fx-font-size: 11px; -fx-text-fill: #2e9e5b; }
+.legend-rejected { -fx-font-size: 11px; -fx-text-fill: #e0483b; }

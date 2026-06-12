@@ -10,6 +10,7 @@ com\graphviz\model\KruskalSolver.class
 com\graphviz\model\BellmanFordResult.class
 com\graphviz\model\Edge.class
 com\graphviz\model\Node.class
+com\graphviz\model\PrimSolver.class
 com\graphviz\model\RandomGraphGenerator.class
 com\graphviz\model\MstStep.class
 com\graphviz\model\Graph.class

@@ -9,5 +9,6 @@ C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\Graph.java
 C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\KruskalSolver.java
 C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\MstStep.java
 C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\Node.java
+C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\PrimSolver.java
 C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\RandomGraphGenerator.java
 C:\Github\visualize-graph-algorithms\src\main\java\com\graphviz\model\UnionFind.java

@@ -19,10 +19,18 @@ public class Main extends Application {
         FXMLLoader loader = new FXMLLoader(
                 getClass().getResource("/com/graphviz/MainView.fxml")
         );
-        Scene scene = new Scene(loader.load(), 800, 600);
+        Scene scene = new Scene(loader.load(), 960, 640);
+
+        // Attach the modern light stylesheet that styles all the controls.
+        scene.getStylesheets().add(
+                getClass().getResource("/com/graphviz/styles.css").toExternalForm()
+        );
 
         primaryStage.setTitle("Graph Algorithm Visualizer");
         primaryStage.setScene(scene);
+        // Keep a sensible minimum so the toolbar rows never clip.
+        primaryStage.setMinWidth(820);
+        primaryStage.setMinHeight(560);
         primaryStage.show();
     }
 

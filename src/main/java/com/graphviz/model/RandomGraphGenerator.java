@@ -26,8 +26,12 @@ public class RandomGraphGenerator {
     // Keeps circles from sitting on top of each other.
     private static final double MIN_NODE_DISTANCE = 80.0;
 
+    // A candidate node centre must be at least this far from any existing edge
+    // segment, so nodes don't appear to sit on top of edges.
+    private static final double MIN_EDGE_CLEARANCE = 30.0;
+
     // How many times we try to find a non-overlapping position before giving up.
-    private static final int MAX_PLACEMENT_TRIES = 30;
+    private static final int MAX_PLACEMENT_TRIES = 50;
 
     private final Random random = new Random();
 
@@ -43,11 +47,13 @@ public class RandomGraphGenerator {
 
         int nodeCount = 5 + random.nextInt(4); // 5, 6, 7, or 8
 
-        // Place nodes one by one, keeping them inside bounds and not overlapping.
+        // Place nodes one by one, keeping them inside bounds, not overlapping
+        // each other, and not landing on top of any already-placed edge.
         List<Node> nodes = new ArrayList<>();
+        List<Edge> edges = new ArrayList<>();
         for (int i = 0; i < nodeCount; i++) {
             String id = String.valueOf((char) ('A' + i));
-            Node node = placeNode(id, canvasWidth, canvasHeight, nodes);
+            Node node = placeNode(id, canvasWidth, canvasHeight, nodes, edges);
             nodes.add(node);
             graph.addNode(node);
         }
@@ -64,7 +70,7 @@ public class RandomGraphGenerator {
         for (int i = 0; i < shuffled.size() - 1; i++) {
             Node a = shuffled.get(i);
             Node b = shuffled.get(i + 1);
-            addUndirectedEdge(graph, a, b, existingEdges);
+            edges.add(addUndirectedEdge(graph, a, b, existingEdges));
         }
 
         // --- Add a few extra random edges for variety ---
@@ -77,7 +83,7 @@ public class RandomGraphGenerator {
             Node a = nodes.get(random.nextInt(nodeCount));
             Node b = nodes.get(random.nextInt(nodeCount));
             if (!a.equals(b) && !existingEdges.contains(edgeKey(a, b))) {
-                addUndirectedEdge(graph, a, b, existingEdges);
+                edges.add(addUndirectedEdge(graph, a, b, existingEdges));
                 added++;
             }
             attempts++;
@@ -92,7 +98,7 @@ public class RandomGraphGenerator {
      * available position if MAX_PLACEMENT_TRIES is reached without a good spot.
      */
     private Node placeNode(String id, double canvasWidth, double canvasHeight,
-                            List<Node> existing) {
+                            List<Node> existing, List<Edge> existingEdges) {
         double usableWidth  = canvasWidth  - 2 * MARGIN;
         double usableHeight = canvasHeight - 2 * MARGIN;
 
@@ -100,40 +106,60 @@ public class RandomGraphGenerator {
             double x = MARGIN + random.nextDouble() * usableWidth;
             double y = MARGIN + random.nextDouble() * usableHeight;
 
-            if (isFarEnough(x, y, existing)) {
+            if (isFarEnough(x, y, existing, existingEdges)) {
                 return new Node(id, x, y);
             }
         }
 
-        // Give up trying and place the node at the last random position found.
-        // This can only happen on very small canvases with many nodes.
+        // Give up and place at the last random position (only on very small canvases).
         double x = MARGIN + random.nextDouble() * usableWidth;
         double y = MARGIN + random.nextDouble() * usableHeight;
         return new Node(id, x, y);
     }
 
-    /** Returns true if (x, y) is far enough from every already-placed node. */
-    private boolean isFarEnough(double x, double y, List<Node> existing) {
-        for (Node n : existing) {
+    /** Returns true if (x, y) is far from every node centre and every edge segment. */
+    private boolean isFarEnough(double x, double y, List<Node> nodes, List<Edge> edges) {
+        for (Node n : nodes) {
             double dx = n.getX() - x;
             double dy = n.getY() - y;
             if (Math.sqrt(dx * dx + dy * dy) < MIN_NODE_DISTANCE) {
                 return false;
             }
         }
+        for (Edge e : edges) {
+            if (distanceToSegment(x, y, e.getSource().getX(), e.getSource().getY(),
+                                        e.getTarget().getX(), e.getTarget().getY())
+                    < MIN_EDGE_CLEARANCE) {
+                return false;
+            }
+        }
         return true;
+    }
+
+    /** Point-to-segment distance between (px, py) and the segment (x1,y1)→(x2,y2). */
+    private double distanceToSegment(double px, double py,
+                                     double x1, double y1, double x2, double y2) {
+        double dx = x2 - x1;
+        double dy = y2 - y1;
+        double lenSq = dx * dx + dy * dy;
+        if (lenSq == 0) return Math.hypot(px - x1, py - y1);
+        double t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
+        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
     }
 
     /**
      * Adds one undirected edge (stored as a single directed edge) with a
-     * random weight between 1 and 20. Also records the pair in existingEdges
-     * so we never create a duplicate.
+     * random weight between 1 and 20. Returns the created Edge so the caller
+     * can track it for clearance checks.
      */
-    private void addUndirectedEdge(Graph graph, Node a, Node b,
-                                    Set<String> existingEdges) {
+    private Edge addUndirectedEdge(Graph graph, Node a, Node b,
+                                   Set<String> existingEdges) {
         int weight = 1 + random.nextInt(20);
         graph.addEdge(a, b, weight);
         existingEdges.add(edgeKey(a, b));
+        // Return the edge that was just added (last in the graph's list).
+        List<Edge> all = graph.getEdges();
+        return all.get(all.size() - 1);
     }
 
     /**

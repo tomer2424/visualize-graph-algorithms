@@ -9,6 +9,7 @@ import com.graphviz.model.Graph;
 import com.graphviz.model.KruskalSolver;
 import com.graphviz.model.MstStep;
 import com.graphviz.model.Node;
+import com.graphviz.model.PrimSolver;
 import com.graphviz.model.RandomGraphGenerator;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
@@ -19,8 +20,10 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.ComboBox;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
@@ -55,7 +58,7 @@ import java.util.Set;
 public class MainController {
 
     // --- Which algorithm is selected ---
-    private enum Algorithm { KRUSKAL, BELLMAN_FORD }
+    private enum Algorithm { KRUSKAL, BELLMAN_FORD, PRIM }
 
     // --- Visual constants ---
     private static final double NODE_RADIUS        = 18.0;
@@ -64,22 +67,24 @@ public class MainController {
     private static final double ARROW_WIDTH        = 6.0;  // half-width of arrowhead
     private static final double CURVE_OFFSET       = 18.0; // how far opposing edges bow apart
 
-    private static final Color NODE_FILL    = Color.web("#a8d8ea");
-    private static final Color NODE_STROKE  = Color.web("#2c3e50");
-    private static final Color SOURCE_FILL  = Color.web("#f9e79f"); // highlight for BF source node
-    private static final Color WEIGHT_COLOR = Color.web("#c0392b");
-    private static final Color DRAG_COLOR   = Color.web("#3498db");
+    // Canvas + node palette — tuned to match the modern light theme (styles.css).
+    private static final Color CANVAS_BG    = Color.web("#fdfdfe");
+    private static final Color NODE_FILL    = Color.web("#dbe9ff");
+    private static final Color NODE_STROKE  = Color.web("#2b3a55");
+    private static final Color SOURCE_FILL  = Color.web("#ffe9a8"); // highlight for BF source node
+    private static final Color WEIGHT_COLOR = Color.web("#d4493d");
+    private static final Color DRAG_COLOR   = Color.web("#3478f6"); // accent blue (matches CSS)
     private static final Color DIST_COLOR   = Color.web("#1a5276"); // distance label color
 
-    // Edge state colors
-    private static final Color EDGE_NORMAL     = Color.web("#888888"); // plain gray
-    private static final Color EDGE_EVALUATING = Color.web("#f1c40f"); // yellow
-    private static final Color EDGE_ACCEPTED   = Color.web("#1e8449"); // green
-    private static final Color EDGE_REJECTED   = Color.web("#c0392b"); // red
+    // Edge state colors — same hex values as the legend dots in styles.css.
+    private static final Color EDGE_NORMAL     = Color.web("#9aa3b2"); // cool gray
+    private static final Color EDGE_EVALUATING = Color.web("#e0a800"); // amber
+    private static final Color EDGE_ACCEPTED   = Color.web("#2e9e5b"); // green
+    private static final Color EDGE_REJECTED   = Color.web("#e0483b"); // red
 
-    private static final Font NODE_FONT   = Font.font("Arial", 13);
-    private static final Font WEIGHT_FONT = Font.font("Arial", 11);
-    private static final Font DIST_FONT   = Font.font("Arial", 11);
+    private static final Font NODE_FONT   = Font.font("Segoe UI", 13);
+    private static final Font WEIGHT_FONT = Font.font("Segoe UI", 11);
+    private static final Font DIST_FONT   = Font.font("Segoe UI", 11);
 
     // --- Animation timing (milliseconds) ---
     private static final long EVALUATING_PAUSE    = 500;
@@ -90,9 +95,11 @@ public class MainController {
     private enum EdgeState { NORMAL, EVALUATING, ACCEPTED, REJECTED }
 
     // --- FXML fields ---
-    @FXML private Canvas graphCanvas;
-    @FXML private Label  statusLabel;
-    @FXML private Button runButton;
+    @FXML private Pane              canvasHolder;
+    @FXML private Canvas            graphCanvas;
+    @FXML private Label             statusLabel;
+    @FXML private Button            runButton;
+    @FXML private ComboBox<String>  algorithmCombo;
     @FXML private Button playButton;
     @FXML private Button pauseButton;
     @FXML private Button stepButton;
@@ -102,6 +109,7 @@ public class MainController {
     private final RandomGraphGenerator generator = new RandomGraphGenerator();
     private final KruskalSolver kruskalSolver = new KruskalSolver();
     private final BellmanFordSolver bellmanFordSolver = new BellmanFordSolver();
+    private final PrimSolver primSolver = new PrimSolver();
     private Graph currentGraph;
 
     // --- Algorithm selection + Bellman-Ford source ---
@@ -109,9 +117,11 @@ public class MainController {
     private Node sourceNode;              // chosen source for Bellman-Ford
     private boolean awaitingSourcePick;   // true while waiting for the user to click a source
 
-    // --- Mouse drag state ---
-    private Node pressedNode;
+    // --- Mouse interaction state ---
+    private Node pressedNode;       // node under the mouse on press
     private double pressX, pressY;
+    private boolean isDraggingNode; // true once the drag exceeds the deadzone
+    private Node pendingEdgeSource; // node waiting for the user to click a target
 
     // --- Color/label state for drawing ---
     private final Map<Edge, EdgeState> edgeStates = new HashMap<>();
@@ -137,12 +147,22 @@ public class MainController {
     public void initialize() {
         currentGraph = new Graph();
 
+        algorithmCombo.getItems().addAll(LABEL_KRUSKAL, LABEL_BELLMAN_FORD, LABEL_PRIM);
+        algorithmCombo.setValue(LABEL_KRUSKAL);
+
+        // Make the canvas fill its holder and follow the window as it resizes.
+        graphCanvas.widthProperty().bind(canvasHolder.widthProperty());
+        graphCanvas.heightProperty().bind(canvasHolder.heightProperty());
+        // Repaint whenever the size changes so the graph never goes blank.
+        graphCanvas.widthProperty().addListener((obs, oldV, newV) -> drawGraph());
+        graphCanvas.heightProperty().addListener((obs, oldV, newV) -> drawGraph());
+
         graphCanvas.setOnMousePressed(this::onCanvasPressed);
         graphCanvas.setOnMouseDragged(this::onCanvasDragged);
         graphCanvas.setOnMouseReleased(this::onCanvasReleased);
 
         drawGraph();
-        statusLabel.setText("Click empty space = new node · Drag node→node = directed edge · Right-click edge = edit weight.");
+        statusLabel.setText("Click empty space = new node · Click node then another = directed edge · Right-click edge = edit weight.");
     }
 
     // -------------------------------------------------------------------------
@@ -151,13 +171,18 @@ public class MainController {
 
     @FXML
     private void onCreateRandomGraph() {
+        // Before the first layout pass the canvas can be 0×0; fall back to a
+        // reasonable default so generated nodes still fit on screen.
+        double w = graphCanvas.getWidth()  > 0 ? graphCanvas.getWidth()  : 760;
+        double h = graphCanvas.getHeight() > 0 ? graphCanvas.getHeight() : 480;
         stopAnyRun();
-        currentGraph = generator.generate(graphCanvas.getWidth(), graphCanvas.getHeight());
+        currentGraph = generator.generate(w, h);
         sourceNode = null;
+        pendingEdgeSource = null;
         clearColorsAndDistances();
         disablePlaybackButtons();
-        // If Bellman-Ford is selected, the user must pick a new source on the new graph.
-        if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
+        // Bellman-Ford and Prim both need the user to pick a node on the new graph.
+        if (selectedAlgorithm == Algorithm.BELLMAN_FORD || selectedAlgorithm == Algorithm.PRIM) {
             awaitingSourcePick = true;
         }
         drawGraph();
@@ -175,28 +200,39 @@ public class MainController {
         clearColorsAndDistances();
         disablePlaybackButtons();
 
-        // Figure out which toggle is now on. The Kruskal toggle starts selected,
-        // so we treat "not Bellman-Ford" as Kruskal.
-        boolean bfSelected = bellmanFordToggleSelected();
-        selectedAlgorithm = bfSelected ? Algorithm.BELLMAN_FORD : Algorithm.KRUSKAL;
-
-        if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
-            sourceNode = null;
-            awaitingSourcePick = true;
-            statusLabel.setText("Bellman-Ford selected — click a node to set the source for shortest paths.");
+        String selected = algorithmCombo.getValue();
+        if (LABEL_BELLMAN_FORD.equals(selected)) {
+            selectedAlgorithm = Algorithm.BELLMAN_FORD;
+        } else if (LABEL_PRIM.equals(selected)) {
+            selectedAlgorithm = Algorithm.PRIM;
         } else {
-            awaitingSourcePick = false;
-            sourceNode = null;
-            statusLabel.setText("Kruskal (MST) selected — press Run to find the minimum spanning tree.");
+            selectedAlgorithm = Algorithm.KRUSKAL;
+        }
+
+        switch (selectedAlgorithm) {
+            case BELLMAN_FORD -> {
+                sourceNode = null;
+                awaitingSourcePick = true;
+                statusLabel.setText("Bellman-Ford selected — click a node to set the source for shortest paths.");
+            }
+            case PRIM -> {
+                sourceNode = null;
+                awaitingSourcePick = true;
+                statusLabel.setText("Prim (MST) selected — click a node to set the starting node.");
+            }
+            default -> {
+                awaitingSourcePick = false;
+                sourceNode = null;
+                statusLabel.setText("Kruskal (MST) selected — press Run to find the minimum spanning tree.");
+            }
         }
         drawGraph();
     }
 
-    // The Bellman-Ford toggle's selected state, injected by FXML.
-    @FXML private javafx.scene.control.ToggleButton bellmanFordToggle;
-    private boolean bellmanFordToggleSelected() {
-        return bellmanFordToggle != null && bellmanFordToggle.isSelected();
-    }
+    // Labels shown in the algorithm drop-down, matching Algorithm enum order.
+    private static final String LABEL_KRUSKAL      = "Kruskal (MST)";
+    private static final String LABEL_BELLMAN_FORD = "Bellman-Ford (Shortest Path)";
+    private static final String LABEL_PRIM         = "Prim (MST)";
 
     // -------------------------------------------------------------------------
     // Run + playback controls
@@ -210,10 +246,10 @@ public class MainController {
             return;
         }
 
-        if (selectedAlgorithm == Algorithm.KRUSKAL) {
-            prepareKruskal();
-        } else {
-            prepareBellmanFord();
+        switch (selectedAlgorithm) {
+            case KRUSKAL      -> prepareKruskal();
+            case BELLMAN_FORD -> prepareBellmanFord();
+            case PRIM         -> preparePrim();
         }
     }
 
@@ -253,6 +289,25 @@ public class MainController {
         startAnimationThread();
         statusLabel.setText("Bellman-Ford ready from source '" + sourceNode.getId()
                 + "'. Press Play, or Step to advance one relaxation at a time.");
+    }
+
+    private void preparePrim() {
+        if (sourceNode == null) {
+            awaitingSourcePick = true;
+            statusLabel.setText("Please click a node first to set the Prim starting node.");
+            return;
+        }
+        stopAnyRun();
+        steps = new ArrayList<>(primSolver.solve(currentGraph, sourceNode));
+        bfResult = null;
+        currentStep = 0;
+        mstTotalWeight = 0;
+        clearColorsAndDistances();
+        drawGraph();
+        enablePlaybackButtons();
+        startAnimationThread();
+        statusLabel.setText("Prim ready from '" + sourceNode.getId()
+                + "'. Press Play, or Step to advance one edge at a time.");
     }
 
     @FXML
@@ -423,21 +478,43 @@ public class MainController {
         playButton.setDisable(true);
         stepButton.setDisable(true);
 
-        if (selectedAlgorithm == Algorithm.KRUSKAL) {
-            statusLabel.setText("MST complete — total weight = " + mstTotalWeight
+        switch (selectedAlgorithm) {
+            case KRUSKAL -> statusLabel.setText("Kruskal complete — MST weight = " + mstTotalWeight
                     + ". Press Reset to run again on the same graph.");
-        } else {
-            if (bfResult != null && bfResult.hasNegativeCycle()) {
-                // Highlight the negative cycle edges in red.
-                for (Edge e : bfResult.getCycleEdges()) {
-                    edgeStates.put(e, EdgeState.REJECTED);
+            case PRIM -> {
+                // Count nodes reached by accepted edges plus the start node itself.
+                Set<Node> reached = new java.util.HashSet<>();
+                if (sourceNode != null) reached.add(sourceNode);
+                for (AlgorithmStep s : steps) {
+                    if (s instanceof MstStep ms && ms.getDecision() == MstStep.Decision.ACCEPTED) {
+                        reached.add(ms.getEdge().getSource());
+                        reached.add(ms.getEdge().getTarget());
+                    }
                 }
-                statusLabel.setText("⚠ Negative-weight cycle detected — shortest paths are undefined. "
-                        + "The cycle edges are shown in red.");
-            } else {
-                statusLabel.setText("Bellman-Ford complete — shortest distances from '"
-                        + (sourceNode != null ? sourceNode.getId() : "?")
-                        + "' are shown on the nodes. Press Reset to run again.");
+                int total = currentGraph.getNodes().size();
+                int unreachable = total - reached.size();
+                String msg = "Prim complete — MST weight = " + mstTotalWeight + ".";
+                if (unreachable > 0) {
+                    msg += " ⚠ " + unreachable + " node(s) unreachable from '"
+                            + (sourceNode != null ? sourceNode.getId() : "?")
+                            + "' (graph is disconnected).";
+                } else {
+                    msg += " Press Reset to run again on the same graph.";
+                }
+                statusLabel.setText(msg);
+            }
+            default -> {
+                if (bfResult != null && bfResult.hasNegativeCycle()) {
+                    for (Edge e : bfResult.getCycleEdges()) {
+                        edgeStates.put(e, EdgeState.REJECTED);
+                    }
+                    statusLabel.setText("⚠ Negative-weight cycle detected — shortest paths are undefined. "
+                            + "The cycle edges are shown in red.");
+                } else {
+                    statusLabel.setText("Bellman-Ford complete — shortest distances from '"
+                            + (sourceNode != null ? sourceNode.getId() : "?")
+                            + "' are shown on the nodes. Press Reset to run again.");
+                }
             }
         }
         drawGraph();
@@ -505,8 +582,15 @@ public class MainController {
     private void onCanvasPressed(MouseEvent e) {
         pressX = e.getX();
         pressY = e.getY();
+        isDraggingNode = false;
 
         if (e.getButton() == MouseButton.SECONDARY) {
+            pendingEdgeSource = null;
+            Node node = findNodeAt(pressX, pressY);
+            if (node != null) {
+                deleteNode(node);
+                return;
+            }
             Edge edge = findEdgeNear(pressX, pressY);
             if (edge != null) {
                 editEdgeWeight(edge);
@@ -514,8 +598,9 @@ public class MainController {
             return;
         }
 
-        // If we are waiting for the user to choose a Bellman-Ford source, the
-        // next click on a node sets the source instead of starting a drag.
+        if (e.getButton() != MouseButton.PRIMARY) return;
+
+        // Bellman-Ford source picking overrides normal click behaviour.
         if (awaitingSourcePick) {
             Node picked = findNodeAt(pressX, pressY);
             if (picked != null) {
@@ -530,49 +615,98 @@ public class MainController {
     }
 
     private void onCanvasDragged(MouseEvent e) {
-        if (pressedNode == null || awaitingSourcePick) {
-            return;
+        if (pressedNode == null || awaitingSourcePick) return;
+
+        double dx = e.getX() - pressX;
+        double dy = e.getY() - pressY;
+        // Enter move mode once the drag exceeds a small deadzone.
+        if (!isDraggingNode && Math.hypot(dx, dy) > NODE_RADIUS / 2) {
+            isDraggingNode = true;
+            // Cancel any pending edge source — the user is clearly moving, not connecting.
+            pendingEdgeSource = null;
         }
-        drawGraph();
-        drawDragPreview(pressedNode.getX(), pressedNode.getY(), e.getX(), e.getY());
+
+        if (isDraggingNode) {
+            pressedNode.setX(e.getX());
+            pressedNode.setY(e.getY());
+            drawGraph();
+        }
     }
 
     private void onCanvasReleased(MouseEvent e) {
         if (e.getButton() != MouseButton.PRIMARY || awaitingSourcePick) {
+            pressedNode = null;
+            isDraggingNode = false;
             return;
         }
 
         double releaseX = e.getX();
         double releaseY = e.getY();
-        Node releaseNode = findNodeAt(releaseX, releaseY);
 
-        if (pressedNode == null && releaseNode == null) {
-            tryAddNode(releaseX, releaseY);
-        } else if (pressedNode != null && releaseNode != null && !pressedNode.equals(releaseNode)) {
-            tryAddEdge(pressedNode, releaseNode);
-        } else if (pressedNode != null) {
-            statusLabel.setText("Edge cancelled — release on a different node to connect two nodes.");
+        if (isDraggingNode && pressedNode != null) {
+            // Clamp to canvas bounds so a node cannot be dragged off-screen.
+            double clampedX = Math.max(NODE_RADIUS, Math.min(graphCanvas.getWidth()  - NODE_RADIUS, releaseX));
+            double clampedY = Math.max(NODE_RADIUS, Math.min(graphCanvas.getHeight() - NODE_RADIUS, releaseY));
+            pressedNode.setX(clampedX);
+            pressedNode.setY(clampedY);
+            cancelRunBecauseGraphChanged();
             drawGraph();
+            statusLabel.setText("Node '" + pressedNode.getId() + "' moved.");
+        } else if (pressedNode != null) {
+            // This was a click (no meaningful drag) on a node.
+            if (pendingEdgeSource != null && !pendingEdgeSource.equals(pressedNode)) {
+                // Second click on a different node — connect them.
+                tryAddEdge(pendingEdgeSource, pressedNode);
+                pendingEdgeSource = null;
+            } else if (pendingEdgeSource != null && pendingEdgeSource.equals(pressedNode)) {
+                // Clicked the same node again — cancel.
+                pendingEdgeSource = null;
+                drawGraph();
+                statusLabel.setText("Edge cancelled.");
+            } else {
+                // First click on a node — enter pending mode.
+                pendingEdgeSource = pressedNode;
+                drawGraph();
+                statusLabel.setText("Node '" + pressedNode.getId() + "' selected — click another node to connect, or click here again to cancel.");
+            }
+        } else {
+            // Click on empty space.
+            if (pendingEdgeSource != null) {
+                // Cancel a pending edge.
+                pendingEdgeSource = null;
+                drawGraph();
+                statusLabel.setText("Edge cancelled.");
+            } else {
+                tryAddNode(releaseX, releaseY);
+            }
         }
 
         pressedNode = null;
+        isDraggingNode = false;
     }
 
-    /** Sets the Bellman-Ford source node and shows the starting distances. */
+    /** Sets the source/start node for Bellman-Ford or Prim. */
     private void setSource(Node node) {
         sourceNode = node;
         awaitingSourcePick = false;
         clearColorsAndDistances();
-        for (Node n : currentGraph.getNodes()) {
-            nodeDistances.put(n, Double.POSITIVE_INFINITY);
+
+        // Bellman-Ford shows ∞ distance labels from the start; Prim just highlights.
+        if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
+            for (Node n : currentGraph.getNodes()) {
+                nodeDistances.put(n, Double.POSITIVE_INFINITY);
+            }
+            nodeDistances.put(sourceNode, 0.0);
+            statusLabel.setText("Source set to '" + node.getId() + "'. Press Run to compute shortest paths.");
+        } else {
+            statusLabel.setText("Start node set to '" + node.getId() + "'. Press Run to build the MST.");
         }
-        nodeDistances.put(sourceNode, 0.0);
         drawGraph();
-        statusLabel.setText("Source set to '" + node.getId() + "'. Press Run to compute shortest paths.");
     }
 
     /** Editing the graph cancels any prepared run so the steps cannot go stale. */
     private void cancelRunBecauseGraphChanged() {
+        pendingEdgeSource = null;
         if (runActive || steps != null) {
             stopAnyRun();
             steps = null;
@@ -584,13 +718,54 @@ public class MainController {
         }
     }
 
+    @FXML
+    private void onClearGraph() {
+        stopAnyRun();
+        currentGraph.clear();
+        sourceNode = null;
+        awaitingSourcePick = false;
+        pendingEdgeSource = null;
+        clearColorsAndDistances();
+        disablePlaybackButtons();
+        steps = null;
+        bfResult = null;
+        drawGraph();
+        statusLabel.setText("Graph cleared. Click empty space to start building a new graph.");
+    }
+
+    private void deleteNode(Node node) {
+        cancelRunBecauseGraphChanged();
+        // Remove node distances and edge states for any edges touching this node.
+        for (Edge e : currentGraph.getEdges()) {
+            if (e.getSource().equals(node) || e.getTarget().equals(node)) {
+                edgeStates.remove(e);
+                fadingEdges.remove(e);
+            }
+        }
+        if (node.equals(sourceNode)) {
+            sourceNode = null;
+            if (selectedAlgorithm == Algorithm.BELLMAN_FORD) {
+                awaitingSourcePick = true;
+            }
+        }
+        nodeDistances.remove(node);
+        flashingNodes.remove(node);
+        currentGraph.removeNode(node);
+        drawGraph();
+        statusLabel.setText("Node '" + node.getId() + "' deleted.");
+    }
+
     private void tryAddNode(double x, double y) {
         if (findNodeAt(x, y) != null) {
             statusLabel.setText("Cannot place a node here — too close to an existing node.");
             return;
         }
-        cancelRunBecauseGraphChanged();
         String id = currentGraph.nextNodeId();
+        if (id == null) {
+            statusLabel.setText("Maximum of 52 nodes reached (A–Z and AA–ZZ).");
+            return;
+        }
+        cancelRunBecauseGraphChanged();
         currentGraph.addNode(new Node(id, x, y));
         drawGraph();
         statusLabel.setText("Node '" + id + "' added. Total: " + currentGraph.getNodes().size() + " nodes.");
@@ -688,7 +863,7 @@ public class MainController {
         GraphicsContext gc = graphCanvas.getGraphicsContext2D();
 
         gc.clearRect(0, 0, graphCanvas.getWidth(), graphCanvas.getHeight());
-        gc.setFill(Color.web("#fafafa"));
+        gc.setFill(CANVAS_BG);
         gc.fillRect(0, 0, graphCanvas.getWidth(), graphCanvas.getHeight());
 
         // --- Step 1: directed edges with arrowheads ---
@@ -707,11 +882,12 @@ public class MainController {
             double cy = node.getY();
             double r  = NODE_RADIUS;
 
-            // A flashing (just-improved) node, or the BF source, get a highlight fill.
             if (flashingNodes.contains(node)) {
                 gc.setFill(EDGE_ACCEPTED);
             } else if (node.equals(sourceNode)) {
                 gc.setFill(SOURCE_FILL);
+            } else if (node.equals(pendingEdgeSource)) {
+                gc.setFill(DRAG_COLOR); // blue highlight while waiting for the second click
             } else {
                 gc.setFill(NODE_FILL);
             }

@@ -35,6 +35,17 @@ public class Graph {
         edges.clear();
     }
 
+    /** Removes a node and all edges that touch it (as source or target). */
+    public void removeNode(Node node) {
+        nodes.remove(node);
+        edges.removeIf(e -> e.getSource().equals(node) || e.getTarget().equals(node));
+    }
+
+    /** Removes a single directed edge. */
+    public void removeEdge(Edge edge) {
+        edges.remove(edge);
+    }
+
     // --- Queries ---
 
     public List<Node> getNodes() {
@@ -67,20 +78,21 @@ public class Graph {
      * random graph has already claimed A through H.
      */
     public String nextNodeId() {
-        // Collect every id already in use.
         java.util.Set<String> used = new java.util.HashSet<>();
         for (Node n : nodes) {
             used.add(n.getId());
         }
-        // Try A, B, C … Z first.
+        // Single letters A–Z, then doubled letters AA–ZZ (52 total).
         for (char c = 'A'; c <= 'Z'; c++) {
-            String candidate = String.valueOf(c);
-            if (!used.contains(candidate)) {
-                return candidate;
-            }
+            String single = String.valueOf(c);
+            if (!used.contains(single)) return single;
         }
-        // Fall back to N<count> — guaranteed unique because node count grows.
-        return "N" + nodes.size();
+        for (char c = 'A'; c <= 'Z'; c++) {
+            String doubled = String.valueOf(c) + c;
+            if (!used.contains(doubled)) return doubled;
+        }
+        // All 52 slots taken — no more nodes allowed.
+        return null;
     }
 
     /**
