@@ -38,11 +38,12 @@
                           styleClass="algorithm-combo"/>
                 <Separator orientation="VERTICAL"/>
                 <Button fx:id="runButton" text="Run" onAction="#onRun"
-                        styleClass="button-primary"/>
+                        styleClass="button-primary" disable="true"/>
             </HBox>
 
-            <!-- Row 2: playing the animation -->
-            <HBox spacing="8" styleClass="toolbar-row" alignment="CENTER_LEFT">
+            <!-- Row 2: playing the animation — hidden until Run is pressed -->
+            <HBox fx:id="playbackBar" spacing="8" styleClass="toolbar-row" alignment="CENTER_LEFT"
+                  visible="false" managed="false">
                 <Label text="Playback" styleClass="section-label"/>
                 <Button fx:id="playButton"  text="▶ Play"  onAction="#onPlay"  disable="true"/>
                 <Button fx:id="pauseButton" text="⏸ Pause" onAction="#onPause" disable="true"/>
@@ -52,7 +53,7 @@
                 <!-- A small color legend so the meaning of each color is clear -->
                 <Label text="Legend" styleClass="legend-label"/>
                 <Label text="● checking"          styleClass="legend-checking"/>
-                <Label text="● accepted/improved"  styleClass="legend-accepted"/>
+                <Label text="● accepted/discovered" styleClass="legend-accepted"/>
                 <Label text="● rejected/cycle"     styleClass="legend-rejected"/>
             </HBox>
         </VBox>

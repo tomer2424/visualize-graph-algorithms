@@ -2,7 +2,7 @@
 
 ## Overview
 
-A JavaFX desktop app that lets you build directed weighted graphs and visually animate three classic graph algorithms step-by-step: Kruskal's MST, Prim's MST, and Bellman-Ford shortest paths.
+A JavaFX desktop app that lets you build directed weighted graphs and visually animate five graph algorithms step-by-step: Kruskal's MST, Prim's MST, Bellman-Ford shortest paths, BFS traversal, and DFS traversal.
 
 **Stack:** Java 21 · JavaFX 21.0.4 · Maven  
 **Run:** `mvn javafx:run`  
@@ -21,10 +21,11 @@ Ctrl    MainController.java                 (UI events, animation, rendering)
         ↕ (plain Java calls)
 Model   Graph / Node / Edge                 (data structures)
         KruskalSolver / PrimSolver /        (algorithm implementations)
-        BellmanFordSolver
+        BellmanFordSolver / BfsSolver /
+        DfsSolver
         UnionFind                           (helper for Kruskal)
         MstStep / BellmanFordStep /         (step records for animation)
-        BellmanFordResult
+        TraversalStep / BellmanFordResult
         RandomGraphGenerator               (connected random graphs)
 ```
 
@@ -67,6 +68,12 @@ Disjoint Set structure used by Kruskal's for cycle detection. Implements path co
 **[BellmanFordSolver.java](src/main/java/com/graphviz/model/BellmanFordSolver.java)**  
 `solve(Graph, Node source) → BellmanFordResult`. Runs V−1 relaxation sweeps over all edges, then one more to detect negative cycles. `traceCycle()` walks back V steps to land inside the cycle, then follows predecessors to collect the exact cycle edges. O(V·E).
 
+**[BfsSolver.java](src/main/java/com/graphviz/model/BfsSolver.java)**  
+`solve(Graph, Node start) → List<TraversalStep>`. Explores in wave order using an `ArrayDeque` as a FIFO queue. Follows edge arrows only (directed). O(V+E).
+
+**[DfsSolver.java](src/main/java/com/graphviz/model/DfsSolver.java)**  
+`solve(Graph, Node start) → List<TraversalStep>`. Iterative DFS using an `ArrayDeque` as a LIFO stack of edges (not nodes). Pushes outgoing edges in reverse order so the first-listed edge pops first, matching recursive DFS visit order. Follows edge arrows only. O(V+E).
+
 **[RandomGraphGenerator.java](src/main/java/com/graphviz/model/RandomGraphGenerator.java)**  
 `generate(canvasWidth, canvasHeight) → Graph`. Produces 5–8 node connected graphs. Places nodes with minimum 80px spacing, then builds a spanning chain (guarantees connectivity), then adds ~nodeCount/2 extra edges. Edge weights are random integers 1–20.
 
@@ -75,13 +82,16 @@ Disjoint Set structure used by Kruskal's for cycle detection. Implements path co
 ### Step / Result Records
 
 **[AlgorithmStep.java](src/main/java/com/graphviz/model/AlgorithmStep.java)**  
-Interface with one method: `getEdge()`. Lets the controller handle MST and Bellman-Ford steps through the same playback loop.
+Interface with one method: `getEdge()`. Lets the controller handle all algorithm step types through the same playback loop. Concrete types: `MstStep`, `BellmanFordStep`, `TraversalStep`.
 
 **[MstStep.java](src/main/java/com/graphviz/model/MstStep.java)**  
 One step in Kruskal's or Prim's. Fields: `edge`, `decision` (ACCEPTED | REJECTED).
 
 **[BellmanFordStep.java](src/main/java/com/graphviz/model/BellmanFordStep.java)**  
 One relaxation attempt. Fields: `edge`, `improved: boolean`, `updatedNode: Node`, `newDistance: double`.
+
+**[TraversalStep.java](src/main/java/com/graphviz/model/TraversalStep.java)**  
+One step in BFS or DFS. Fields: `edge`, `discovered: boolean`, `discoveredNode: Node` (null when not discovered). Shared by both traversal solvers since their step semantics are identical.
 
 **[BellmanFordResult.java](src/main/java/com/graphviz/model/BellmanFordResult.java)**  
 Full Bellman-Ford output. Fields: `steps: List<AlgorithmStep>`, `finalDistances: Map<Node, Double>`, `negativeCycle: boolean`, `cycleEdges: List<Edge>`.
@@ -101,7 +111,7 @@ Central orchestrator. Responsibilities: graph editing, algorithm dispatch, anima
 | `CURVE_OFFSET` | 18.0 | Bow offset for bidirectional edges |
 | `EDGE_NORMAL` | #9aa3b2 | Gray — default |
 | `EDGE_EVALUATING` | #e0a800 | Amber — algorithm is checking |
-| `EDGE_ACCEPTED` | #2e9e5b | Green — added to MST / distance improved |
+| `EDGE_ACCEPTED` | #2e9e5b | Green — added to MST / distance improved / node discovered |
 | `EDGE_REJECTED` | #e0483b | Red — rejected (then fades to gray) |
 | `NODE_FILL` | #dbe9ff | Normal node fill |
 | `SOURCE_FILL` | #ffe9a8 | Source node fill (Bellman-Ford / Prim) |
@@ -110,15 +120,16 @@ Central orchestrator. Responsibilities: graph editing, algorithm dispatch, anima
 | Field | Purpose |
 |---|---|
 | `currentGraph: Graph` | Live graph data |
-| `selectedAlgorithm: Algorithm` | KRUSKAL, BELLMAN_FORD, or PRIM |
+| `selectedAlgorithm: Algorithm` | KRUSKAL, BELLMAN_FORD, PRIM, BFS, or DFS |
 | `steps: List<AlgorithmStep>` | Prepared animation steps |
 | `currentStep: int` | Current playback position |
 | `playing / stepRequested / runActive` | Volatile flags for animation thread control |
 | `edgeStates: Map<Edge, EdgeState>` | Color override per edge |
 | `nodeDistances: Map<Node, Double>` | Distance labels (Bellman-Ford only) |
 | `fadingEdges: Map<Edge, Double>` | Red→gray fade progress 0–1 |
-| `flashingNodes: Set<Node>` | Nodes with green flash |
-| `sourceNode: Node` | Chosen start for BF / Prim |
+| `flashingNodes: Set<Node>` | Nodes with temporary green flash (Bellman-Ford) |
+| `visitedNodes: Set<Node>` | Traversal nodes that stay green for the rest of the run (BFS/DFS) |
+| `sourceNode: Node` | Chosen start for BF / Prim / BFS / DFS |
 | `awaitingSourcePick: boolean` | Waiting for user to click a start node |
 
 #### Animation Thread
@@ -128,6 +139,7 @@ Flow: `onRun()` → `prepareXxx()` → `startAnimationThread()` → loop calling
 
 - `runMstStep(MstStep)` — flash amber 500ms, then green (ACCEPTED) or red→fade (REJECTED)
 - `runBellmanFordStep(BellmanFordStep)` — flash amber 500ms, update distance label and flash node green if improved
+- `runTraversalStep(TraversalStep)` — flash amber 500ms, then edge+node stay green (discovered) or red→fade (already visited)
 - `startFade(Edge)` — 500ms AnimationTimer interpolating red→gray
 
 #### Mouse Interaction
@@ -192,5 +204,7 @@ Light theme. Key classes: `.button`, `.button-primary` (blue Run button), `.algo
 | Kruskal's MST | `KruskalSolver` | O(E log E + E α(V)) | UnionFind |
 | Prim's MST | `PrimSolver` | O(E log V) | PriorityQueue (min-heap) |
 | Bellman-Ford | `BellmanFordSolver` | O(V·E) | distance array + predecessor map |
+| BFS Traversal | `BfsSolver` | O(V+E) | ArrayDeque (FIFO queue) |
+| DFS Traversal | `DfsSolver` | O(V+E) | ArrayDeque (LIFO stack of edges) |
 
-All three solvers work on directed graphs. Prim's treats edges as undirected internally. Bellman-Ford supports negative edge weights and detects + traces negative cycles.
+All five solvers work on directed graphs. Prim's treats edges as undirected internally. Bellman-Ford supports negative edge weights and detects + traces negative cycles. BFS and DFS follow edge arrows only; unreachable nodes are reported at completion.
